@@ -1,0 +1,10 @@
+{
+  "name": "fb-clone-backend",
+  "dependencies": {
+    "mongodb": "4.10.0",
+    "graphql": "16.6.0"
+  },
+  "scripts": {
+    "start": "node index.js"
+  }
+}
