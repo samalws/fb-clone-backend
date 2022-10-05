@@ -1,3 +1,4 @@
+# TODO option to redact user fields if they're private
 type User {
   id: String!
   username: String!
@@ -34,6 +35,8 @@ type Query {
   myUser(tok: String!): User!
   lookupUserId(tok: String, id: String!): User
   lookupUsername(tok: String, username: String!): User
+  lookupPostId(tok: String, id: String!): Post
+  lookupReplyId(tok: String, id: String!): Reply
   feed(tok: String, pageNum: Int!): [Post]
   login(id: String!, pwHashPreSalt: String!): String
 }
@@ -44,5 +47,5 @@ type Mutation {
   makePost(tok: String!, message: String!): Post
   reply(tok: String!, id: String!, message: String!): Reply
   setAcctPrivacy(tok: String!, friendOnly: Boolean!): Boolean! # success?
-  setAcctPassword(tok: String!, pwHash: String!): Boolean! # success?
+  setAcctPassword(tok: String!, pwHashPreSalt: String!): Boolean! # success?
 }
