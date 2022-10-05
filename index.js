@@ -2,9 +2,13 @@ const fs = require("fs")
 const mongodb = require("mongodb")
 const graphql = require("graphql")
 
+// TODO delete post or reply
+// TODO right now timestamp is a number despite its type being a string
 // TODO tok stuff, acct privacy stuff
 // TODO return null/false if stuff errors
 // TODO is friends with query
+// TODO don't alphabetize when inserting a friend request
+// TODO get a list of incoming and outgoing friend requests for my user
 
 var db
 
@@ -44,7 +48,7 @@ async function lookupUser(tok, query, projection) {
 function post(tok, id) {
   var vals
   function getVals() {
-    vals = (vals !== undefined) ? vals : db.collection("users").findOne({ _id: id }, { projection: { _id: 0 } })
+    vals = (vals !== undefined) ? vals : db.collection("posts").findOne({ _id: id }, { projection: { _id: 0 } })
     return vals
   }
   const getField = (f) => getVals().then((v) => v[f])
@@ -74,7 +78,7 @@ async function lookupPost(tok, query, projection) {
 function reply(tok, id) {
   var vals
   function getVals() {
-    vals = (vals !== undefined) ? vals : db.collection("users").findOne({ _id: id }, { projection: { _id: 0 } })
+    vals = (vals !== undefined) ? vals : db.collection("replies").findOne({ _id: id }, { projection: { _id: 0 } })
     return vals
   }
   const getField = (f) => getVals().then((v) => v[f])
@@ -102,6 +106,7 @@ async function lookupReply(tok, query, projection) {
   return retVal
 }
 
+// TODO should only return mutuals
 async function userFriends(tok, id) {
   const respA = await db.collection("friends").find({ personA: id }, { projection: { _id: 0, personB: 1 }})
   const listA = await respA.toArray()
@@ -140,6 +145,9 @@ async function getLiked(tok, id) {
 }
 
 async function setFriendStatus(tok, id, val) { // TODO test
+  const existsQuery = await db.collection("users").findOne({ _id: id }, { projection: { _id: 0, /* TODO rest */ } })
+  if (existsQuery === null) return false
+
   if (id === tok) return false
   const query = id < tok ? { friendA: id, friendB: tok } : { friendA: tok, friendB: id }
   if (val)
@@ -149,15 +157,23 @@ async function setFriendStatus(tok, id, val) { // TODO test
   return true
 }
 
-async function setLike(tok, id, like) { // TODO test
-  if (like)
-    await db.collection("likes").insertOne({ liker: tok, post: id })
-  else
+async function setLike(tok, id, like) {
+  const existsQueryA = await db.collection("posts").findOne({ _id: id }, { projection: { _id: 0, timestamp: 0, poster: 0, message: 0 }})
+  const existsQueryB = await db.collection("replies").findOne({ _id: id }, { projection: { _id: 0, timestamp: 0, poster: 0, message: 0, replyTo: 0 }})
+  if (existsQueryA === null && existsQueryB === null) return false
+
+  if (like) {
+    try {
+      await db.collection("likes").insertOne({ liker: tok, post: id })
+    } catch (err) {
+      return false
+    }
+  } else
     await db.collection("likes").deleteOne({ liker: tok, post: id })
   return true
 }
 
-async function makePost(tok, message) { // TODO test
+async function makePost(tok, message) {
   const query = {
     timestamp: Date.now(),
     poster: tok,
@@ -173,9 +189,8 @@ async function makePost(tok, message) { // TODO test
   return retVal
 }
 
-async function reply(tok, replyTo, message) { // TODO test
-  const existsQuery = await db.collection("posts").findOne({ _id: replyTo }, { projection: { _id: 0 }})
-  console.log("existsQuery:",existsQuery) // should be {} TODO change others to do just { _id: 0 }
+async function makeReply(tok, replyTo, message) {
+  const existsQuery = await db.collection("posts").findOne({ _id: replyTo }, { projection: { _id: 0, timestamp: 0, poster: 0, message: 0 }})
   if (existsQuery === null) return undefined
 
   const query = {
@@ -203,10 +218,10 @@ const rootValue = {
   feed: ({ tok, pageNum }) => [], // TODO
   login: ({ id, pwHashPreSalt }) => id, // TODO
 
-  setFriendStatus: ({ tok, id, val }) => setFriendStatus(tok, id, val),
-  setLike: ({ tok, id, like }) => setLike(tok, id, like),
-  makePost: ({ tok, message }) => makePost(tok, message),
-  makeReply: ({ tok, replyTo, message }) => makeReply(tok, replyTo, message),
+  setFriendStatus: ({ tok, id, val }) => setFriendStatus(new mongodb.ObjectId(tok), new mongodb.ObjectId(id), val),
+  setLike: ({ tok, id, like }) => setLike(new mongodb.ObjectId(tok), new mongodb.ObjectId(id), like),
+  makePost: ({ tok, message }) => makePost(new mongodb.ObjectId(tok), message),
+  makeReply: ({ tok, replyTo, message }) => makeReply(new mongodb.ObjectId(tok), new mongodb.ObjectId(replyTo), message),
   setAcctPrivacy: ({ tok, friendOnly }) => false, // TODO
   setAcctPassword: ({ tok, pwHashPreSalt }) => false, // TODO
 }
