@@ -3,6 +3,8 @@ const mongodb = require("mongodb")
 const graphql = require("graphql")
 
 // TODO tok stuff, acct privacy stuff
+// TODO return null/false if stuff errors
+// TODO is friends with query
 
 var db
 
@@ -137,6 +139,61 @@ async function getLiked(tok, id) {
   return retVal !== null
 }
 
+async function setFriendStatus(tok, id, val) { // TODO test
+  if (id === tok) return false
+  const query = id < tok ? { friendA: id, friendB: tok } : { friendA: tok, friendB: id }
+  if (val)
+    await db.collection("friends").insertOne(query)
+  else
+    await db.collection("friends").deleteOne(query)
+  return true
+}
+
+async function setLike(tok, id, like) { // TODO test
+  if (like)
+    await db.collection("likes").insertOne({ liker: tok, post: id })
+  else
+    await db.collection("likes").deleteOne({ liker: tok, post: id })
+  return true
+}
+
+async function makePost(tok, message) { // TODO test
+  const query = {
+    timestamp: Date.now(),
+    poster: tok,
+    message,
+  }
+  const response = await db.collection("posts").insertOne(query)
+  const retVal = query
+  retVal.id = response.insertedId
+  retVal.poster = () => user(tok, tok)
+  retVal.likes = 0
+  retVal.liked = false
+  retVal.replies = []
+  return retVal
+}
+
+async function reply(tok, replyTo, message) { // TODO test
+  const existsQuery = await db.collection("posts").findOne({ _id: replyTo }, { projection: { _id: 0 }})
+  console.log("existsQuery:",existsQuery) // should be {} TODO change others to do just { _id: 0 }
+  if (existsQuery === null) return undefined
+
+  const query = {
+    timestamp: Date.now(),
+    poster: tok,
+    message,
+    replyTo,
+  }
+  const response = await db.collection("replies").insertOne(query)
+  const retVal = query
+  retVal.id = response.insertedId
+  retVal.poster = () => user(tok, tok)
+  retVal.likes = 0
+  retVal.liked = false
+  retVal.replyTo = () => post(tok, replyTo)
+  return retVal
+}
+
 const rootValue = {
   myUser: ({ tok }) => user(new mongodb.ObjectId(tok), new mongodb.ObjectId(tok)),
   lookupUserId: ({ tok, id }) => lookupUser(new mongodb.ObjectId(tok), { _id: new mongodb.ObjectId(id) }, { _id: 0 }),
@@ -146,10 +203,10 @@ const rootValue = {
   feed: ({ tok, pageNum }) => [], // TODO
   login: ({ id, pwHashPreSalt }) => id, // TODO
 
-  setFriendStatus: ({ tok, id, val }) => false, // TODO
-  setLike: ({ tok, id, like }) => false, // TODO
-  makePost: ({ tok, message }) => null, // TODO
-  reply: ({ tok, id, message }) => null, // TODO
+  setFriendStatus: ({ tok, id, val }) => setFriendStatus(tok, id, val),
+  setLike: ({ tok, id, like }) => setLike(tok, id, like),
+  makePost: ({ tok, message }) => makePost(tok, message),
+  makeReply: ({ tok, replyTo, message }) => makeReply(tok, replyTo, message),
   setAcctPrivacy: ({ tok, friendOnly }) => false, // TODO
   setAcctPassword: ({ tok, pwHashPreSalt }) => false, // TODO
 }

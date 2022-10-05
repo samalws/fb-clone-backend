@@ -45,7 +45,7 @@ type Mutation {
   setFriendStatus(tok: String!, id: String!, val: Boolean!): Boolean! # success?
   setLike(tok: String!, id: String!, like: Boolean!): Boolean! # success?
   makePost(tok: String!, message: String!): Post
-  reply(tok: String!, id: String!, message: String!): Reply
+  makeReply(tok: String!, replyTo: String!, message: String!): Reply
   setAcctPrivacy(tok: String!, friendOnly: Boolean!): Boolean! # success?
   setAcctPassword(tok: String!, pwHashPreSalt: String!): Boolean! # success?
 }
