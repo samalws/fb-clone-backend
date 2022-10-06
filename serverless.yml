@@ -1,0 +1,22 @@
+# stolen from https://www.apollographql.com/docs/apollo-server/deployment/lambda/
+# serverless.yml
+
+service: apollo-lambda
+provider:
+  name: aws
+  runtime: nodejs14.x
+  environment:
+    MONGO_URI: ${file(env.yml):MONGO_URI}
+functions:
+  graphql:
+    # this is formatted as <FILENAME>.<HANDLER>
+    handler: graphql.graphqlHandler
+    events:
+    - http:
+        path: /
+        method: post
+        cors: true
+    - http:
+        path: /
+        method: get
+        cors: true

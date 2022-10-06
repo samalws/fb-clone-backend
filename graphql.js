@@ -1,6 +1,6 @@
 const fs = require("fs")
 const mongodb = require("mongodb")
-const { gql, ApolloServer }  = require("apollo-server")
+const { gql, ApolloServer }  = require("apollo-server-lambda")
 const { ApolloServerPluginLandingPageLocalDefault }  = require("apollo-server-core")
 
 // TODO delete post or reply
@@ -304,4 +304,6 @@ const resolvers = {
 }
 
 const server = new ApolloServer({typeDefs,resolvers,csrfPrevention: true,cache: "bounded",plugins: [ApolloServerPluginLandingPageLocalDefault({})]})
-const listening = server.listen().then(({url}) => console.log("running server at", url))
+// server.listen().then(({url}) => console.log("running server at", url))
+
+exports.graphqlHandler = server.createHandler()

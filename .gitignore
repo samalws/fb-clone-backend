@@ -26,5 +26,7 @@ yarn-error.log*
 .direnv
 .envrc
 
-secrets
+env.yml
 sandbox.js
+
+.serverless
