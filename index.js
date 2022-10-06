@@ -64,11 +64,13 @@ type Mutation {
 }
 `
 
-var db
+const uri = process.env.MONGO_URI
+const dbPromise = new mongodb.MongoClient(uri).connect().then((client) => client.db("fb-clone"))
 
 function user(tok, id) {
   var vals
-  function getVals() {
+  async function getVals() {
+    const db = await dbPromise
     vals = (vals !== undefined) ? vals : db.collection("users").findOne({ _id: id }, { projection: { _id: 0 } })
     return vals
   }
@@ -87,6 +89,7 @@ function user(tok, id) {
 }
 
 async function lookupUser(tok, query, projection) {
+  const db = await dbPromise
   const lookuped = await db.collection("users").findOne(query, { projection })
   if (lookuped === null) return undefined
   const retVal = Object.assign({}, lookuped, query)
@@ -101,7 +104,8 @@ async function lookupUser(tok, query, projection) {
 
 function post(tok, id) {
   var vals
-  function getVals() {
+  async function getVals() {
+    const db = await dbPromise
     vals = (vals !== undefined) ? vals : db.collection("posts").findOne({ _id: id }, { projection: { _id: 0 } })
     return vals
   }
@@ -118,6 +122,7 @@ function post(tok, id) {
 }
 
 async function lookupPost(tok, query, projection) {
+  const db = await dbPromise
   const lookuped = await db.collection("posts").findOne(query, { projection })
   if (lookuped === null) return undefined
   const retVal = Object.assign({}, lookuped, query)
@@ -132,7 +137,8 @@ async function lookupPost(tok, query, projection) {
 
 function reply(tok, id) {
   var vals
-  function getVals() {
+  async function getVals() {
+    const db = await dbPromise
     vals = (vals !== undefined) ? vals : db.collection("replies").findOne({ _id: id }, { projection: { _id: 0 } })
     return vals
   }
@@ -149,6 +155,7 @@ function reply(tok, id) {
 }
 
 async function lookupReply(tok, query, projection) {
+  const db = await dbPromise
   const lookuped = await db.collection("replies").findOne(query, { projection })
   if (lookuped === null) return undefined
   const retVal = Object.assign({}, lookuped, query)
@@ -164,6 +171,7 @@ async function lookupReply(tok, query, projection) {
 
 // TODO should only return mutuals
 async function userFriends(tok, id) {
+  const db = await dbPromise
   const respA = await db.collection("friends").find({ personA: id }, { projection: { _id: 0, personB: 1 }})
   const listA = await respA.toArray()
   const respB = await db.collection("friends").find({ personB: id }, { projection: { _id: 0, personA: 1 }})
@@ -173,34 +181,40 @@ async function userFriends(tok, id) {
 }
 
 async function userPosts(tok, id) {
+  const db = await dbPromise
   const resp = await db.collection("posts").find({ poster: id }, { projection: { _id: 1 }})
   const list = await resp.toArray()
   return list.map(({ _id }) => post(tok, _id))
 }
 
 async function userReplies(tok, id) {
+  const db = await dbPromise
   const resp = await db.collection("replies").find({ poster: id }, { projection: { _id: 1 }})
   const list = await resp.toArray()
   return list.map(({ _id }) => reply(tok, _id))
 }
 
 async function postReplies(tok, id) {
+  const db = await dbPromise
   const resp = await db.collection("replies").find({ replyTo: id }, { projection: { _id: 1 }})
   const list = await resp.toArray()
   return list.map(({ _id }) => reply(tok, _id))
 }
 
 async function getLikes(tok, id) {
+  const db = await dbPromise
   const retVal = await db.collection("likes").count({ post: id })
   return retVal
 }
 
 async function getLiked(tok, id) {
+  const db = await dbPromise
   const retVal = await db.collection("likes").findOne({ liker: tok, post: id }, { projection: { _id: 0, liker: 0, post: 0 }})
   return retVal !== null
 }
 
 async function setFriendStatus(tok, id, val) { // TODO test
+  const db = await dbPromise
   const existsQuery = await db.collection("users").findOne({ _id: id }, { projection: { _id: 0, /* TODO rest */ } })
   if (existsQuery === null) return false
 
@@ -214,6 +228,7 @@ async function setFriendStatus(tok, id, val) { // TODO test
 }
 
 async function setLike(tok, id, like) {
+  const db = await dbPromise
   const existsQueryA = await db.collection("posts").findOne({ _id: id }, { projection: { _id: 0, timestamp: 0, poster: 0, message: 0 }})
   const existsQueryB = await db.collection("replies").findOne({ _id: id }, { projection: { _id: 0, timestamp: 0, poster: 0, message: 0, replyTo: 0 }})
   if (existsQueryA === null && existsQueryB === null) return false
@@ -235,6 +250,7 @@ async function makePost(tok, message) {
     poster: tok,
     message,
   }
+  const db = await dbPromise
   const response = await db.collection("posts").insertOne(query)
   const retVal = query
   retVal.id = response.insertedId
@@ -246,6 +262,7 @@ async function makePost(tok, message) {
 }
 
 async function makeReply(tok, replyTo, message) {
+  const db = await dbPromise
   const existsQuery = await db.collection("posts").findOne({ _id: replyTo }, { projection: { _id: 0, timestamp: 0, poster: 0, message: 0 }})
   if (existsQuery === null) return undefined
 
@@ -267,36 +284,24 @@ async function makeReply(tok, replyTo, message) {
 
 const resolvers = {
   Query: {
-    myUser: ({ tok }) => user(new mongodb.ObjectId(tok), new mongodb.ObjectId(tok)),
-    lookupUserId: ({ tok, id }) => lookupUser(new mongodb.ObjectId(tok), { _id: new mongodb.ObjectId(id) }, { _id: 0 }),
-    lookupUsername: ({ tok, username }) => lookupUser(new mongodb.ObjectId(tok), { username }, { username: 0 }),
-    lookupPostId: ({ tok, id }) => lookupPost(new mongodb.ObjectId(tok), { _id: new mongodb.ObjectId(id) }, { _id: 0 }),
-    lookupReplyId: ({ tok, id }) => lookupReply(new mongodb.ObjectId(tok), { _id: new mongodb.ObjectId(id) }, { _id: 0 }),
-    feed: ({ tok, pageNum }) => [], // TODO
-    login: ({ id, pwHashPreSalt }) => id, // TODO
+    myUser: (parent, { tok }, context, info) => user(new mongodb.ObjectId(tok), new mongodb.ObjectId(tok)),
+    lookupUserId: (parent, { tok, id }, context, info) => lookupUser(new mongodb.ObjectId(tok), { _id: new mongodb.ObjectId(id) }, { _id: 0 }),
+    lookupUsername: (parent, { tok, username }, context, info) => lookupUser(new mongodb.ObjectId(tok), { username }, { username: 0 }),
+    lookupPostId: (parent, { tok, id }, context, info) => lookupPost(new mongodb.ObjectId(tok), { _id: new mongodb.ObjectId(id) }, { _id: 0 }),
+    lookupReplyId: (parent, { tok, id }, context, info) => lookupReply(new mongodb.ObjectId(tok), { _id: new mongodb.ObjectId(id) }, { _id: 0 }),
+    feed: (parent, { tok, pageNum }, context, info) => [], // TODO
+    login: (parent, { id, pwHashPreSalt }, context, info) => id, // TODO
   },
 
   Mutation: {
-    setFriendStatus: ({ tok, id, val }) => setFriendStatus(new mongodb.ObjectId(tok), new mongodb.ObjectId(id), val),
-    setLike: ({ tok, id, like }) => setLike(new mongodb.ObjectId(tok), new mongodb.ObjectId(id), like),
-    makePost: ({ tok, message }) => makePost(new mongodb.ObjectId(tok), message),
-    makeReply: ({ tok, replyTo, message }) => makeReply(new mongodb.ObjectId(tok), new mongodb.ObjectId(replyTo), message),
-    setAcctPrivacy: ({ tok, friendOnly }) => false, // TODO
-    setAcctPassword: ({ tok, pwHashPreSalt }) => false, // TODO
+    setFriendStatus: (parent, { tok, id, val }, context, info) => setFriendStatus(new mongodb.ObjectId(tok), new mongodb.ObjectId(id), val),
+    setLike: (parent, { tok, id, like }, context, info) => setLike(new mongodb.ObjectId(tok), new mongodb.ObjectId(id), like),
+    makePost: (parent, { tok, message }, context, info) => makePost(new mongodb.ObjectId(tok), message),
+    makeReply: (parent, { tok, replyTo, message }, context, info) => makeReply(new mongodb.ObjectId(tok), new mongodb.ObjectId(replyTo), message),
+    setAcctPrivacy: (parent, { tok, friendOnly }, context, info) => false, // TODO
+    setAcctPassword: (parent, { tok, pwHashPreSalt }, context, info) => false, // TODO
   }
 }
 
-async function main() {
-  const uri = process.env.MONGO_URI
-  const mongoClient = new mongodb.MongoClient(uri)
-  await mongoClient.connect()
-  db = mongoClient.db("fb-clone")
-  console.log("connected to database")
-
-  const server = new ApolloServer({typeDefs,resolvers,plugins: [ApolloServerPluginLandingPageLocalDefault({})]})
-  const listening = await server.listen()
-
-  console.log("running server at", listening.url)
-}
-
-main()
+const server = new ApolloServer({typeDefs,resolvers,csrfPrevention: true,cache: "bounded",plugins: [ApolloServerPluginLandingPageLocalDefault({})]})
+const listening = server.listen().then(({url}) => console.log("running server at", url))
