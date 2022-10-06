@@ -1,6 +1,8 @@
 const fs = require("fs")
 const mongodb = require("mongodb")
 const graphql = require("graphql")
+const express = require("express")
+const { graphqlHTTP } = require("express-graphql")
 
 // TODO delete post or reply
 // TODO right now timestamp is a number despite its type being a string
@@ -55,7 +57,7 @@ function post(tok, id) {
   return {
     id,
     timestamp: () => getField("timestamp"),
-    poster: () => user(tok, getField("poster")),
+    poster: () => getField("poster").then((uid) => user(tok, uid)),
     message: () => getField("message"),
     likes: () => getLikes(tok, id),
     liked: () => getLiked(tok, id),
@@ -85,11 +87,11 @@ function reply(tok, id) {
   return {
     id,
     timestamp: () => getField("timestamp"),
-    poster: () => user(tok, getField("poster")),
+    poster: () => getField("poster").then((uid) => user(tok, uid)),
     message: () => getField("message"),
     likes: () => getLikes(tok, id),
     liked: () => getLiked(tok, id),
-    replyTo: () => post(tok, getField("replyTo")),
+    replyTo: () => getField("replyTo").then((pid) => post(tok, pid)),
   }
 }
 
@@ -231,15 +233,15 @@ async function main() {
   const mongoClient = new mongodb.MongoClient(uri)
   await mongoClient.connect()
   db = mongoClient.db("fb-clone")
-  console.log("connected!")
+  console.log("connected to database")
 
   const schemaContents = fs.readFileSync("backendSchema.gql", { encoding: "utf8" })
   const schema = graphql.buildSchema(schemaContents)
 
-  // example query
-  const source = '{ lookupUsername(tok: "633c86feaf773c87606e08fc", username: "Username0") { id, username, name, pfpLink, isFriendReqIn, isFriendReqOut, friends { id, friends { id } }, posts { id, likes, liked, replies { likes, liked, id } } } }'
-
-  graphql.graphql({ schema, source, rootValue }).then((ret) => console.log("FINAL VALUE", JSON.stringify(ret)))
+  const server = express()
+  server.use("/graphql", graphqlHTTP({ schema, rootValue, graphiql: true }))
+  server.listen(4000)
+  console.log("running server")
 }
 
 main()
