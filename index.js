@@ -1,8 +1,7 @@
 const fs = require("fs")
 const mongodb = require("mongodb")
-const graphql = require("graphql")
-const express = require("express")
-const { graphqlHTTP } = require("express-graphql")
+const { gql, ApolloServer }  = require("apollo-server")
+const { ApolloServerPluginLandingPageLocalDefault }  = require("apollo-server-core")
 
 // TODO delete post or reply
 // TODO right now timestamp is a number despite its type being a string
@@ -11,6 +10,59 @@ const { graphqlHTTP } = require("express-graphql")
 // TODO is friends with query
 // TODO don't alphabetize when inserting a friend request
 // TODO get a list of incoming and outgoing friend requests for my user
+
+const typeDefs = gql`
+type User {
+  id: String!
+  username: String!
+  name: String!
+  pfpLink: String!
+  friends: [User!]!
+  isFriendReqIn: Boolean!
+  isFriendReqOut: Boolean!
+  posts: [Post!]!
+  replies: [Reply!]!
+}
+
+type Post {
+  id: String!
+  timestamp: String!
+  poster: User!
+  message: String!
+  likes: Int!
+  liked: Boolean!
+  replies: [Reply!]!
+}
+
+type Reply {
+  id: String!
+  timestamp: String!
+  poster: User!
+  message: String!
+  likes: Int!
+  liked: Boolean!
+  replyTo: Post!
+}
+
+type Query {
+  myUser(tok: String!): User!
+  lookupUserId(tok: String, id: String!): User
+  lookupUsername(tok: String, username: String!): User
+  lookupPostId(tok: String, id: String!): Post
+  lookupReplyId(tok: String, id: String!): Reply
+  feed(tok: String, pageNum: Int!): [Post]
+  login(id: String!, pwHashPreSalt: String!): String
+}
+
+type Mutation {
+  setFriendStatus(tok: String!, id: String!, val: Boolean!): Boolean! # success?
+  setLike(tok: String!, id: String!, like: Boolean!): Boolean! # success?
+  makePost(tok: String!, message: String!): Post
+  makeReply(tok: String!, replyTo: String!, message: String!): Reply
+  setAcctPrivacy(tok: String!, friendOnly: Boolean!): Boolean! # success?
+  setAcctPassword(tok: String!, pwHashPreSalt: String!): Boolean! # success?
+}
+`
 
 var db
 
@@ -213,21 +265,25 @@ async function makeReply(tok, replyTo, message) {
   return retVal
 }
 
-const rootValue = {
-  myUser: ({ tok }) => user(new mongodb.ObjectId(tok), new mongodb.ObjectId(tok)),
-  lookupUserId: ({ tok, id }) => lookupUser(new mongodb.ObjectId(tok), { _id: new mongodb.ObjectId(id) }, { _id: 0 }),
-  lookupUsername: ({ tok, username }) => lookupUser(new mongodb.ObjectId(tok), { username }, { username: 0 }),
-  lookupPostId: ({ tok, id }) => lookupPost(new mongodb.ObjectId(tok), { _id: new mongodb.ObjectId(id) }, { _id: 0 }),
-  lookupReplyId: ({ tok, id }) => lookupReply(new mongodb.ObjectId(tok), { _id: new mongodb.ObjectId(id) }, { _id: 0 }),
-  feed: ({ tok, pageNum }) => [], // TODO
-  login: ({ id, pwHashPreSalt }) => id, // TODO
+const resolvers = {
+  Query: {
+    myUser: ({ tok }) => user(new mongodb.ObjectId(tok), new mongodb.ObjectId(tok)),
+    lookupUserId: ({ tok, id }) => lookupUser(new mongodb.ObjectId(tok), { _id: new mongodb.ObjectId(id) }, { _id: 0 }),
+    lookupUsername: ({ tok, username }) => lookupUser(new mongodb.ObjectId(tok), { username }, { username: 0 }),
+    lookupPostId: ({ tok, id }) => lookupPost(new mongodb.ObjectId(tok), { _id: new mongodb.ObjectId(id) }, { _id: 0 }),
+    lookupReplyId: ({ tok, id }) => lookupReply(new mongodb.ObjectId(tok), { _id: new mongodb.ObjectId(id) }, { _id: 0 }),
+    feed: ({ tok, pageNum }) => [], // TODO
+    login: ({ id, pwHashPreSalt }) => id, // TODO
+  },
 
-  setFriendStatus: ({ tok, id, val }) => setFriendStatus(new mongodb.ObjectId(tok), new mongodb.ObjectId(id), val),
-  setLike: ({ tok, id, like }) => setLike(new mongodb.ObjectId(tok), new mongodb.ObjectId(id), like),
-  makePost: ({ tok, message }) => makePost(new mongodb.ObjectId(tok), message),
-  makeReply: ({ tok, replyTo, message }) => makeReply(new mongodb.ObjectId(tok), new mongodb.ObjectId(replyTo), message),
-  setAcctPrivacy: ({ tok, friendOnly }) => false, // TODO
-  setAcctPassword: ({ tok, pwHashPreSalt }) => false, // TODO
+  Mutation: {
+    setFriendStatus: ({ tok, id, val }) => setFriendStatus(new mongodb.ObjectId(tok), new mongodb.ObjectId(id), val),
+    setLike: ({ tok, id, like }) => setLike(new mongodb.ObjectId(tok), new mongodb.ObjectId(id), like),
+    makePost: ({ tok, message }) => makePost(new mongodb.ObjectId(tok), message),
+    makeReply: ({ tok, replyTo, message }) => makeReply(new mongodb.ObjectId(tok), new mongodb.ObjectId(replyTo), message),
+    setAcctPrivacy: ({ tok, friendOnly }) => false, // TODO
+    setAcctPassword: ({ tok, pwHashPreSalt }) => false, // TODO
+  }
 }
 
 async function main() {
@@ -237,13 +293,10 @@ async function main() {
   db = mongoClient.db("fb-clone")
   console.log("connected to database")
 
-  const schemaContents = fs.readFileSync("backendSchema.gql", { encoding: "utf8" })
-  const schema = graphql.buildSchema(schemaContents)
+  const server = new ApolloServer({typeDefs,resolvers,plugins: [ApolloServerPluginLandingPageLocalDefault({})]})
+  const listening = await server.listen()
 
-  const server = express()
-  server.use("/graphql", graphqlHTTP({ schema, rootValue, graphiql: true }))
-  server.listen(4000)
-  console.log("running server")
+  console.log("running server at", listening.url)
 }
 
 main()
