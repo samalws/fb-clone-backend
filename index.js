@@ -70,7 +70,8 @@ async function lookupPost(tok, query, projection) {
   if (lookuped === null) return undefined
   const retVal = Object.assign({}, lookuped, query)
   retVal.id = retVal._id
-  retVal.poster = () => user(tok, retVal.poster)
+  const oldPoster = retVal.poster
+  retVal.poster = () => user(tok, oldPoster)
   retVal.likes = () => getLikes(tok, retVal.id)
   retVal.liked = () => getLiked(tok, retVal.id)
   retVal.replies = () => postReplies(tok, retVal.id)
@@ -100,7 +101,8 @@ async function lookupReply(tok, query, projection) {
   if (lookuped === null) return undefined
   const retVal = Object.assign({}, lookuped, query)
   retVal.id = retVal._id
-  retVal.poster = () => user(tok, retVal.poster)
+  const oldPoster = retVal.poster
+  retVal.poster = () => user(tok, oldPoster)
   retVal.likes = () => getLikes(tok, retVal.id)
   retVal.liked = () => getLiked(tok, retVal.id)
   const oldReplyTo = retVal.replyTo
