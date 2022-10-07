@@ -1,7 +1,10 @@
-const fs = require("fs")
-const mongodb = require("mongodb")
-const { gql, ApolloServer }  = require("apollo-server-lambda")
+LOCAL_MODE = false
+
+const { MongoClient, ObjectId } = require("mongodb")
+const { gql, ApolloServer } = require(LOCAL_MODE ? "apollo-server" : "apollo-server-lambda")
 const { ApolloServerPluginLandingPageLocalDefault }  = require("apollo-server-core")
+const keccak256 = require("keccak256")
+const { randomBytes } = require("crypto")
 
 // TODO delete post or reply
 // TODO right now timestamp is a number despite its type being a string
@@ -61,11 +64,22 @@ type Mutation {
   makeReply(tok: String!, replyTo: String!, message: String!): Reply
   setAcctPrivacy(tok: String!, friendOnly: Boolean!): Boolean! # success?
   setAcctPassword(tok: String!, pwHashPreSalt: String!): Boolean! # success?
+  makeAcct(username: String!, name: String!, pfpLink: String!, pwHashPreSalt: String!): User
 }
 `
 
+/* MONGODB SCHEMA:
+
+users: { username: string, name: string, pfpLInk: string, pwHash: string, pwSalt: string } (TODO username should be unique)
+posts: { timestamp: string, poster: id, message: string }
+replies: { timestamp: string, poster: id, message: string, replyTo: id }
+friends: { personA: id, personB: id } unique (TODO)
+likes: { liker: id, post: id } unique
+
+*/
+
 const uri = process.env.MONGO_URI
-const dbPromise = new mongodb.MongoClient(uri).connect().then((client) => client.db("fb-clone"))
+const dbPromise = new MongoClient(uri).connect().then((client) => client.db("fb-clone"))
 
 function user(tok, id) {
   var vals
@@ -282,28 +296,52 @@ async function makeReply(tok, replyTo, message) {
   return retVal
 }
 
+async function makeAcct(username, name, pfpLink, pwHashPreSalt) {
+  const db = await dbPromise
+  const salt = randomBytes(16).toString("base64")
+  const pwHash = keccak256(salt+pwHashPreSalt)
+  try {
+    const response = await db.collection("users").insertOne({ username, name, pfpLink, pwHash, salt })
+    if (!response.acknowledged) return null
+    return user(response.insertedId, response.insertedId)
+  } catch (err) {
+    return null
+  }
+}
+
+async function login(id, pwHashPreSalt) {
+  const db = await dbPromise
+  const user = await db.collection("users").findOne({ _id: id }, { _id: 0, pwHash: 1, salt: 1 })
+  if (user === null) return null
+  const pwHash = keccak256(user.salt+pwHashPreSalt)
+  const userPwHash = Buffer.from(user.pwHash.toString("base64"), "base64")
+  if (!pwHash.equals(userPwHash)) return null
+  return id // TODO
+}
+
 const resolvers = {
   Query: {
-    myUser: (parent, { tok }, context, info) => user(new mongodb.ObjectId(tok), new mongodb.ObjectId(tok)),
-    lookupUserId: (parent, { tok, id }, context, info) => lookupUser(new mongodb.ObjectId(tok), { _id: new mongodb.ObjectId(id) }, { _id: 0 }),
-    lookupUsername: (parent, { tok, username }, context, info) => lookupUser(new mongodb.ObjectId(tok), { username }, { username: 0 }),
-    lookupPostId: (parent, { tok, id }, context, info) => lookupPost(new mongodb.ObjectId(tok), { _id: new mongodb.ObjectId(id) }, { _id: 0 }),
-    lookupReplyId: (parent, { tok, id }, context, info) => lookupReply(new mongodb.ObjectId(tok), { _id: new mongodb.ObjectId(id) }, { _id: 0 }),
+    myUser: (parent, { tok }, context, info) => user(new ObjectId(tok), new ObjectId(tok)),
+    lookupUserId: (parent, { tok, id }, context, info) => lookupUser(new ObjectId(tok), { _id: new ObjectId(id) }, { _id: 0 }),
+    lookupUsername: (parent, { tok, username }, context, info) => lookupUser(new ObjectId(tok), { username }, { username: 0 }),
+    lookupPostId: (parent, { tok, id }, context, info) => lookupPost(new ObjectId(tok), { _id: new ObjectId(id) }, { _id: 0 }),
+    lookupReplyId: (parent, { tok, id }, context, info) => lookupReply(new ObjectId(tok), { _id: new ObjectId(id) }, { _id: 0 }),
     feed: (parent, { tok, pageNum }, context, info) => [], // TODO
-    login: (parent, { id, pwHashPreSalt }, context, info) => id, // TODO
+    login: (parent, { id, pwHashPreSalt }, context, info) => login(new ObjectId(id), pwHashPreSalt),
   },
 
   Mutation: {
-    setFriendStatus: (parent, { tok, id, val }, context, info) => setFriendStatus(new mongodb.ObjectId(tok), new mongodb.ObjectId(id), val),
-    setLike: (parent, { tok, id, like }, context, info) => setLike(new mongodb.ObjectId(tok), new mongodb.ObjectId(id), like),
-    makePost: (parent, { tok, message }, context, info) => makePost(new mongodb.ObjectId(tok), message),
-    makeReply: (parent, { tok, replyTo, message }, context, info) => makeReply(new mongodb.ObjectId(tok), new mongodb.ObjectId(replyTo), message),
+    setFriendStatus: (parent, { tok, id, val }, context, info) => setFriendStatus(new ObjectId(tok), new ObjectId(id), val),
+    setLike: (parent, { tok, id, like }, context, info) => setLike(new ObjectId(tok), new ObjectId(id), like),
+    makePost: (parent, { tok, message }, context, info) => makePost(new ObjectId(tok), message),
+    makeReply: (parent, { tok, replyTo, message }, context, info) => makeReply(new ObjectId(tok), new ObjectId(replyTo), message),
     setAcctPrivacy: (parent, { tok, friendOnly }, context, info) => false, // TODO
     setAcctPassword: (parent, { tok, pwHashPreSalt }, context, info) => false, // TODO
+    makeAcct: (parent, { username, name, pfpLink, pwHashPreSalt }, context, info) => makeAcct(username, name, pfpLink, pwHashPreSalt),
   }
 }
 
 const server = new ApolloServer({typeDefs,resolvers,csrfPrevention: true,cache: "bounded",plugins: [ApolloServerPluginLandingPageLocalDefault({})]})
-// server.listen().then(({url}) => console.log("running server at", url))
+if (LOCAL_MODE) server.listen().then(({url}) => console.log("running server at", url))
 
-exports.graphqlHandler = server.createHandler()
+if (!LOCAL_MODE) exports.graphqlHandler = server.createHandler()

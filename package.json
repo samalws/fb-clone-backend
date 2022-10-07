@@ -3,11 +3,10 @@
   "dependencies": {
     "apollo-server": "^3.10.2",
     "apollo-server-lambda": "^3.10.2",
+    "crypto": "^1.0.1",
     "graphql": "^16.6.0",
+    "keccak256": "^1.0.6",
     "mongodb": "^4.10.0",
     "serverless": "^3.22.0"
-  },
-  "scripts": {
-    "start": "node index.js"
   }
 }
