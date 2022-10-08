@@ -1,17 +1,14 @@
-# stolen from https://www.apollographql.com/docs/apollo-server/deployment/lambda/
-# serverless.yml
-
-service: apollo-lambda
+service: fb-clone-backend-lambda
 provider:
   name: aws
   runtime: nodejs14.x
+  region: us-east-1
   environment:
     MONGO_URI: ${file(env.yml):MONGO_URI}
     LAMBDA_MODE: 1
 functions:
   graphql:
-    # this is formatted as <FILENAME>.<HANDLER>
-    handler: graphql.graphqlHandler
+    handler: backend.handler
     events:
     - http:
         path: /
