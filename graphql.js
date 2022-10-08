@@ -50,7 +50,6 @@ type Query {
   lookupPostId(tok: String, id: String!): Post
   lookupReplyId(tok: String, id: String!): Reply
   feed(tok: String, pageNum: Int!): [Post]
-  login(id: String!, pwHashPreSalt: String!): String
 }
 
 type Mutation {
@@ -61,6 +60,8 @@ type Mutation {
   setAcctPrivacy(tok: String!, friendOnly: Boolean!): Boolean! # success?
   setAcctPassword(tok: String!, pwHashPreSalt: String!): Boolean! # success?
   makeAcct(username: String!, name: String!, pfpLink: String!, pwHashPreSalt: String!): User
+  login(id: String!, pwHashPreSalt: String!): String
+  clearTok(tok: String!): Boolean! # success?
 }
 `
 
@@ -299,7 +300,6 @@ async function makeAcct(username, name, pfpLink, pwHashPreSalt) {
   const pwHash = keccak256(salt.toString("base64")+pwHashPreSalt)
   try {
     const response = await db.collection("users").insertOne({ username, name, pfpLink, pwHash, salt })
-    if (!response.acknowledged) return null
     return user(response.insertedId, response.insertedId)
   } catch (err) {
     return null
@@ -319,6 +319,12 @@ async function login(id, pwHashPreSalt) {
   await db.collection("tokens").insertOne({ user: id, tok, expires: Date.now() + (1000*60*60*24*7 /* a week from now */) })
 
   return login.toString("base64")
+}
+
+async function clearTok(tok) {
+  const db = await dbPromise
+  const response = db.collection("tokens").deleteOne({ tok })
+  return response.deletedCount == 1
 }
 
 async function tokToId(tok) {
@@ -357,7 +363,6 @@ const resolvers = {
     lookupPostId: [({ login, id }) => lookupPost(login, { _id: new ObjectId(id) }, { _id: 0 })],
     lookupReplyId: [({ login, id }) => lookupReply(login, { _id: new ObjectId(id) }, { _id: 0 })],
     feed: [({ login, pageNum }) => []], // TODO
-    login: [({ id, pwHashPreSalt }) => login(new ObjectId(id), pwHashPreSalt), undefined, true],
   },
 
   Mutation: {
@@ -368,6 +373,8 @@ const resolvers = {
     setAcctPrivacy: [({ login, friendOnly }) => false, false], // TODO
     setAcctPassword: [({ login, pwHashPreSalt }) => false, false], // TODO
     makeAcct: [({ username, name, pfpLink, pwHashPreSalt }) => makeAcct(username, name, pfpLink, pwHashPreSalt), undefined, true],
+    login: [({ id, pwHashPreSalt }) => login(new ObjectId(id), pwHashPreSalt), undefined, true],
+    clearTok: [({ tok }) => clearTok(tok), false, true],
   }
 }
 
