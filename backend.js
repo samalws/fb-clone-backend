@@ -28,6 +28,7 @@ type Post {
   timestamp: Int!
   poster: User!
   message: String!
+  imageLinks: [String!]!
   likes: Int!
   liked: Boolean!
   replies: [Reply!]!
@@ -62,7 +63,7 @@ type Query {
 type Mutation {
   setFriendStatus(tok: String!, id: String!, val: Boolean!): Boolean! # success?
   setLike(tok: String!, id: String!, like: Boolean!): Boolean! # success?
-  makePost(tok: String!, message: String!): Post
+  makePost(tok: String!, message: String!, images: [Image!]!): Post
   makeReply(tok: String!, replyTo: String!, message: String!): Reply
   setAcctPrivacy(tok: String!, friendOnly: Boolean!): Boolean! # success?
   setAcctPassword(tok: String!, pwHashPreSalt: String!): Boolean! # success?
@@ -76,7 +77,7 @@ type Mutation {
 
 type image = { bucket: string, region: string, uuid: string, ext: string }
 users: { username: string, name: string, pfp: image, pwHash: string, pwSalt: string } (TODO username should be unique)
-posts: { timestamp: int, poster: id, message: string }
+posts: { timestamp: int, poster: id, message: string, images: [image] }
 replies: { timestamp: int, poster: id, message: string, replyTo: id }
 friends: { personA: id, personB: id } unique (TODO)
 likes: { liker: id, post: id } unique
@@ -140,6 +141,7 @@ function post(login, id) {
     timestamp: () => getField("timestamp"),
     poster: () => getField("poster").then((uid) => user(login, uid)),
     message: () => getField("message"),
+    imageLinks: () => getField("images").then((is) => is.map(imageToLink)),
     likes: () => getLikes(login, id),
     liked: () => getLiked(login, id),
     replies: () => postReplies(login, id),
@@ -152,6 +154,7 @@ async function lookupPost(login, query, projection) {
   if (lookuped === null) return undefined
   const retVal = Object.assign({}, lookuped, query)
   retVal.id = retVal._id
+  retVal.imageLinks = retVal.images.map(imageToLink)
   const oldPoster = retVal.poster
   retVal.poster = () => user(login, oldPoster)
   retVal.likes = () => getLikes(login, retVal.id)
@@ -269,11 +272,12 @@ async function setLike(login, id, like) {
   return true
 }
 
-async function makePost(login, message) {
+async function makePost(login, message, images) {
   const query = {
     timestamp: Date.now(),
     poster: login,
     message,
+    images,
   }
   const db = await dbPromise
   const response = await db.collection("posts").insertOne(query)
@@ -382,7 +386,7 @@ const resolvers = {
   Mutation: {
     setFriendStatus: [({ login, id, val }) => setFriendStatus(login, new ObjectId(id), val), false],
     setLike: [({ login, id, like }) => setLike(login, new ObjectId(id), like), false],
-    makePost: [({ login, message }) => makePost(login, message)],
+    makePost: [({ login, message, images }) => makePost(login, message, images)],
     makeReply: [({ login, replyTo, message }) => makeReply(login, new ObjectId(replyTo), message)],
     setAcctPrivacy: [({ login, friendOnly }) => false, false], // TODO
     setAcctPassword: [({ login, pwHashPreSalt }) => false, false], // TODO
