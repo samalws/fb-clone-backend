@@ -10,6 +10,6 @@
     "serverless": "^3.22.0"
   },
   "scripts": {
-    "start": "node graphql.js"
+    "start": "node backend.js"
   }
 }

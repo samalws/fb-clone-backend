@@ -1,1 +1,0 @@
-npx serverless invoke local -f graphql -p query.json

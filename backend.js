@@ -391,4 +391,4 @@ for (key in resolvers.Mutation) {
 const server = new ApolloServer({typeDefs,resolvers,csrfPrevention: true,cache: "bounded",plugins: [ApolloServerPluginLandingPageLocalDefault({})]})
 if (!LAMBDA_MODE) server.listen().then(({url}) => console.log("running server at", url))
 
-if (LAMBDA_MODE) exports.graphqlHandler = server.createHandler()
+if (LAMBDA_MODE) exports.handler = server.createHandler()
