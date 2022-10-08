@@ -318,7 +318,7 @@ async function login(id, pwHashPreSalt) {
   const tok = randomBytes(16)
   await db.collection("tokens").insertOne({ user: id, tok, expires: Date.now() + (1000*60*60*24*7 /* a week from now */) })
 
-  return login.toString("base64")
+  return tok.toString("base64")
 }
 
 async function clearTok(tok) {
