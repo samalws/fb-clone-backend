@@ -43,6 +43,13 @@ type Reply {
   replyTo: Post!
 }
 
+input Image {
+  bucket: String!
+  region: String!
+  uuid: String!
+  ext: String!
+}
+
 type Query {
   myUser(tok: String!): User
   lookupUserId(tok: String, id: String!): User
@@ -59,7 +66,7 @@ type Mutation {
   makeReply(tok: String!, replyTo: String!, message: String!): Reply
   setAcctPrivacy(tok: String!, friendOnly: Boolean!): Boolean! # success?
   setAcctPassword(tok: String!, pwHashPreSalt: String!): Boolean! # success?
-  makeAcct(username: String!, name: String!, pfpLink: String!, pwHashPreSalt: String!): User
+  makeAcct(username: String!, name: String!, pfp: Image!, pwHashPreSalt: String!): User
   login(id: String!, pwHashPreSalt: String!): String
   clearTok(tok: String!): Boolean! # success?
 }
@@ -67,7 +74,8 @@ type Mutation {
 
 /* MONGODB SCHEMA:
 
-users: { username: string, name: string, pfpLink: string, pwHash: string, pwSalt: string } (TODO username should be unique)
+type image = { bucket: string, region: string, uuid: string, ext: string }
+users: { username: string, name: string, pfp: image, pwHash: string, pwSalt: string } (TODO username should be unique)
 posts: { timestamp: int, poster: id, message: string }
 replies: { timestamp: int, poster: id, message: string, replyTo: id }
 friends: { personA: id, personB: id } unique (TODO)
@@ -78,6 +86,10 @@ tokens: { user: id, tok: id, expires: string } (TODO remove after expiration dat
 
 const uri = process.env.MONGO_URI
 const dbPromise = new MongoClient(uri).connect().then((client) => client.db("fb-clone"))
+
+function imageToLink(image) {
+  return "https://" + image.bucket + ".s3.amazonaws.com/" + image.uuid + "." + image.ext
+}
 
 function user(login, id) {
   var vals
@@ -91,7 +103,7 @@ function user(login, id) {
     id,
     username: () => getField("username"),
     name: () => getField("name"),
-    pfpLink: () => getField("pfpLink"),
+    pfpLink: () => getField("pfp").then(imageToLink),
     isFriendReqIn: false, // TODO
     isFriendReqOut: false, // TODO
     friends: () => userFriends(login, id),
@@ -106,6 +118,7 @@ async function lookupUser(login, query, projection) {
   if (lookuped === null) return undefined
   const retVal = Object.assign({}, lookuped, query)
   retVal.id = retVal._id
+  retVal.pfpLink = imageToLink(retVal.pfp)
   retVal.isFriendReqIn = false // TODO
   retVal.isFriendReqOut = false // TODO
   retVal.friends = () => userFriends(login, retVal.id)
@@ -294,12 +307,13 @@ async function makeReply(login, replyTo, message) {
   return retVal
 }
 
-async function makeAcct(username, name, pfpLink, pwHashPreSalt) {
+async function makeAcct(username, name, pfp, pwHashPreSalt) {
   const db = await dbPromise
   const salt = randomBytes(16)
   const pwHash = keccak256(salt.toString("base64")+pwHashPreSalt)
   try {
-    const response = await db.collection("users").insertOne({ username, name, pfpLink, pwHash, salt })
+    // TODO sanitize pfp
+    const response = await db.collection("users").insertOne({ username, name, pfp, pwHash, salt })
     return user(response.insertedId, response.insertedId)
   } catch (err) {
     return null
@@ -372,7 +386,7 @@ const resolvers = {
     makeReply: [({ login, replyTo, message }) => makeReply(login, new ObjectId(replyTo), message)],
     setAcctPrivacy: [({ login, friendOnly }) => false, false], // TODO
     setAcctPassword: [({ login, pwHashPreSalt }) => false, false], // TODO
-    makeAcct: [({ username, name, pfpLink, pwHashPreSalt }) => makeAcct(username, name, pfpLink, pwHashPreSalt), undefined, true],
+    makeAcct: [({ username, name, pfp, pwHashPreSalt }) => makeAcct(username, name, pfp, pwHashPreSalt), undefined, true],
     login: [({ id, pwHashPreSalt }) => login(new ObjectId(id), pwHashPreSalt), undefined, true],
     clearTok: [({ tok }) => clearTok(tok), false, true],
   }
