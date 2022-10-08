@@ -7,6 +7,7 @@ provider:
   runtime: nodejs14.x
   environment:
     MONGO_URI: ${file(env.yml):MONGO_URI}
+    LAMBDA_MODE: 1
 functions:
   graphql:
     # this is formatted as <FILENAME>.<HANDLER>
