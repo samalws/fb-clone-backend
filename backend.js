@@ -8,7 +8,7 @@ const { randomBytes } = require("crypto")
 
 // TODO delete post
 // TODO is friends with query
-// TODO friend requests
+// TODO change { _id: 0, everything else: 0 } into { _id: 1 }
 
 const typeDefs = gql`
 type User {
@@ -20,6 +20,7 @@ type User {
   isFriendReqIn: Boolean!
   isFriendReqOut: Boolean!
   posts: [Post!]!
+  reposts: [Post!]!
   replies: [Reply!]!
 }
 
@@ -31,6 +32,8 @@ type Post {
   imageLinks: [String!]!
   likes: Int!
   liked: Boolean!
+  reposted: Boolean!
+  canRepost: Boolean!
   replies: [Reply!]!
 }
 
@@ -63,6 +66,7 @@ type Query {
 type Mutation {
   setFriendStatus(tok: String!, id: String!, val: Boolean!): Boolean! # success?
   setLike(tok: String!, id: String!, like: Boolean!): Boolean! # success?
+  repost(tok: String!, postId: String!): Boolean! # success?
   makePost(tok: String!, message: String!, images: [Image!]!): Post
   makeReply(tok: String!, replyTo: String!, message: String!): Reply
   setAcctPrivacy(tok: String!, friendOnly: Boolean!): Boolean! # success?
@@ -76,8 +80,9 @@ type Mutation {
 /* MONGODB SCHEMA:
 
 type image = { bucket: string, region: string, uuid: string, ext: string }
-users: { username: string, name: string, pfp: image, pwHash: string, pwSalt: string } (TODO username should be unique)
+users: { username: string, name: string, pfp: image, pwHash: string, pwSalt: string } username is unique
 posts: { timestamp: int, poster: id, message: string, images: [image] }
+reposts: { reposter: id, postId: id } unique
 replies: { timestamp: int, poster: id, message: string, replyTo: id }
 friendReqs: { sender: id, receiver: id } unique
 likes: { liker: id, post: id } unique
@@ -109,6 +114,7 @@ function user(login, id) {
     isFriendReqOut: () => usersFriendReq(login, login, id),
     friends: () => userFriends(login, id),
     posts: () => userPosts(login, id),
+    reposts: () => userReposts(login, id),
     replies: () => userReplies(login, id),
   }
 }
@@ -124,6 +130,7 @@ async function lookupUser(login, query, projection) {
   retVal.isFriendReqOut = () => usersFriendReq(login, login, retVal.id)
   retVal.friends = () => userFriends(login, retVal.id)
   retVal.posts = () => userPosts(login, retVal.id),
+  retVal.reposts = () => userReposts(login, retVal.id),
   retVal.replies = () => userReplies(login, retVal.id)
   return retVal
 }
@@ -144,6 +151,8 @@ function post(login, id) {
     imageLinks: () => getField("images").then((is) => is.map(imageToLink)),
     likes: () => getLikes(login, id),
     liked: () => getLiked(login, id),
+    reposted: () => getReposted(login, id),
+    canRepost: () => getField("poster").then((uid) => !login.equals(uid)),
     replies: () => postReplies(login, id),
   }
 }
@@ -159,6 +168,8 @@ async function lookupPost(login, query, projection) {
   retVal.poster = () => user(login, oldPoster)
   retVal.likes = () => getLikes(login, retVal.id)
   retVal.liked = () => getLiked(login, retVal.id)
+  retVal.reposted = () => getReposted(login, retVal.id)
+  retVal.canRepost = !login.equals(oldPoster)
   retVal.replies = () => postReplies(login, retVal.id)
   return retVal
 }
@@ -223,6 +234,13 @@ async function userPosts(login, id) {
   return list.map(({ _id }) => post(login, _id))
 }
 
+async function userReposts(login, id) {
+  const db = await dbPromise
+  const resp = await db.collection("reposts").find({ reposter: id }, { projection: { _id: 0, postId: 1 }})
+  const list = await resp.toArray()
+  return list.map(({ postId }) => post(login, postId))
+}
+
 async function userReplies(login, id) {
   const db = await dbPromise
   const resp = await db.collection("replies").find({ poster: id }, { projection: { _id: 1 }})
@@ -249,7 +267,13 @@ async function getLiked(login, id) {
   return retVal !== null
 }
 
-async function setFriendStatus(login, id, val) { // TODO test
+async function getReposted(login, id) {
+  const db = await dbPromise
+  const retVal = await db.collection("reposts").findOne({ reposter: login, postId: id }, { projection: { _id: 0, reposter: 0, postId: 0 }})
+  return retVal !== null
+}
+
+async function setFriendStatus(login, id, val) {
   const db = await dbPromise
   const existsQuery = await db.collection("users").findOne({ _id: id }, { projection: { _id: 0, pwHash: 0, pwSalt: 0, /* TODO rest */ } })
   if (existsQuery === null) return false
@@ -265,7 +289,7 @@ async function setFriendStatus(login, id, val) { // TODO test
 
 async function setLike(login, id, like) {
   const db = await dbPromise
-  const existsQueryA = await db.collection("posts").findOne({ _id: id }, { projection: { _id: 0, timestamp: 0, poster: 0, message: 0 }})
+  const existsQueryA = await db.collection("posts").findOne({ _id: id }, { projection: { _id: 0, timestamp: 0, poster: 0, message: 0 }}) // TODO images 0
   const existsQueryB = await db.collection("replies").findOne({ _id: id }, { projection: { _id: 0, timestamp: 0, poster: 0, message: 0, replyTo: 0 }})
   if (existsQueryA === null && existsQueryB === null) return false
 
@@ -280,7 +304,21 @@ async function setLike(login, id, like) {
   return true
 }
 
-async function makePost(login, message, images) {
+async function repost(login, postId) {
+  const db = await dbPromise
+  const existsQuery = await db.collection("posts").findOne({ _id: postId }, { projection: { _id: 0, poster: 1 }})
+  if (existsQuery === null || existsQuery.poster.equals(login)) return false
+
+  const query = {
+    reposter: login,
+    postId: postId,
+  }
+  await db.collection("reposts").insertOne(query)
+
+  return true
+}
+
+async function makePost(login, message, images) { // TODO assert that login is nonnull, same with other functions
   const query = {
     timestamp: Date.now(),
     poster: login,
@@ -395,6 +433,7 @@ const resolvers = {
   Mutation: {
     setFriendStatus: [({ login, id, val }) => setFriendStatus(login, new ObjectId(id), val), false],
     setLike: [({ login, id, like }) => setLike(login, new ObjectId(id), like), false],
+    repost: [({ login, postId }) => repost(login, new ObjectId(postId)), false],
     makePost: [({ login, message, images }) => makePost(login, message, images)],
     makeReply: [({ login, replyTo, message }) => makeReply(login, new ObjectId(replyTo), message)],
     setAcctPrivacy: [({ login, friendOnly }) => false, false], // TODO

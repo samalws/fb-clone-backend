@@ -8,9 +8,11 @@ async function main() {
 
   var result = await db.collection("users").createIndex({username: 1},{unique: true})
   console.log(result)
-  result = await db.collection("friends").createIndex({personA: 1, personB: 1},{unique: true})
+  result = await db.collection("friendReqs").createIndex({sender: 1, receiver: 1},{unique: true})
   console.log(result)
   result = await db.collection("likes").createIndex({liker: 1, post: 1},{unique: true})
+  console.log(result)
+  result = await db.collection("reposts").createIndex({reposter: 1, postId: 1},{unique: true})
   console.log(result)
 
   console.log("done")
