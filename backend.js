@@ -69,8 +69,8 @@ type Mutation {
   repost(tok: String!, postId: String!): Boolean! # success?
   makePost(tok: String!, message: String!, images: [Image!]!): Post
   makeReply(tok: String!, replyTo: String!, message: String!): Reply
-  setAcctPrivacy(tok: String!, friendOnly: Boolean!): Boolean! # success?
-  setAcctPassword(tok: String!, pwHashPreSalt: String!): Boolean! # success?
+  # TODO setAcctPrivacy(tok: String!, friendOnly: Boolean!): Boolean! # success?
+  changeAcctSettings(tok: String!, name: String, pfp: Image, pwHashPreSalt: String): Boolean! # success?
   makeAcct(username: String!, name: String!, pfp: Image!, pwHashPreSalt: String!): User
   login(id: String!, pwHashPreSalt: String!): String
   clearTok(tok: String!): Boolean! # success?
@@ -357,12 +357,35 @@ async function makeReply(login, replyTo, message) {
   return retVal
 }
 
+async function changeAcctSettings(login, name, pfp, pwHashPreSalt) {
+  const db = await dbPromise
+
+  const toSet = {}
+
+  if (name != null) toSet.name = name
+  if (pfp != null) toSet.pfp = pfp
+  if (pwHashPreSalt != null) {
+    toSet.salt = randomBytes(16)
+    toSet.pwHash = keccak256(toSet.salt.toString("base64")+pwHashPreSalt)
+  }
+
+  const response = await db.collection("users").updateOne({ _id: login }, { "$set": toSet })
+  return response.modifiedCount === 1
+}
+
+async function setAcctPfp(login, pfp) {
+  const db = await dbPromise
+  const response = await db.collection("users").updateOne({ _id: login }, { "$set": { pfp } })
+  return response.modifiedCount === 1
+}
+
 async function makeAcct(username, name, pfp, pwHashPreSalt) {
   const db = await dbPromise
   const salt = randomBytes(16)
   const pwHash = keccak256(salt.toString("base64")+pwHashPreSalt)
   try {
     // TODO sanitize pfp
+    // TODO why do we try catch here but nowhere else?
     const response = await db.collection("users").insertOne({ username, name, pfp, pwHash, salt })
     return user(response.insertedId, response.insertedId)
   } catch (err) {
@@ -436,8 +459,7 @@ const resolvers = {
     repost: [({ login, postId }) => repost(login, new ObjectId(postId)), false],
     makePost: [({ login, message, images }) => makePost(login, message, images)],
     makeReply: [({ login, replyTo, message }) => makeReply(login, new ObjectId(replyTo), message)],
-    setAcctPrivacy: [({ login, friendOnly }) => false, false], // TODO
-    setAcctPassword: [({ login, pwHashPreSalt }) => false, false], // TODO
+    changeAcctSettings: [({ login, name, pfp, pwHashPreSalt }) => changeAcctSettings(login, name, pfp, pwHashPreSalt), false],
     makeAcct: [({ username, name, pfp, pwHashPreSalt }) => makeAcct(username, name, pfp, pwHashPreSalt), undefined, true],
     login: [({ id, pwHashPreSalt }) => login(new ObjectId(id), pwHashPreSalt), undefined, true],
     clearTok: [({ tok }) => clearTok(tok), false, true],
