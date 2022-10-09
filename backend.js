@@ -79,7 +79,7 @@ type image = { bucket: string, region: string, uuid: string, ext: string }
 users: { username: string, name: string, pfp: image, pwHash: string, pwSalt: string } (TODO username should be unique)
 posts: { timestamp: int, poster: id, message: string, images: [image] }
 replies: { timestamp: int, poster: id, message: string, replyTo: id }
-friends: { personA: id, personB: id } unique (TODO)
+friendReqs: { sender: id, receiver: id } unique
 likes: { liker: id, post: id } unique
 tokens: { user: id, tok: id, expires: string } (TODO remove after expiration date)
 
@@ -105,8 +105,8 @@ function user(login, id) {
     username: () => getField("username"),
     name: () => getField("name"),
     pfpLink: () => getField("pfp").then(imageToLink),
-    isFriendReqIn: false, // TODO
-    isFriendReqOut: false, // TODO
+    isFriendReqIn: () => usersFriendReq(login, id, login),
+    isFriendReqOut: () => usersFriendReq(login, login, id),
     friends: () => userFriends(login, id),
     posts: () => userPosts(login, id),
     replies: () => userReplies(login, id),
@@ -120,8 +120,8 @@ async function lookupUser(login, query, projection) {
   const retVal = Object.assign({}, lookuped, query)
   retVal.id = retVal._id
   retVal.pfpLink = imageToLink(retVal.pfp)
-  retVal.isFriendReqIn = false // TODO
-  retVal.isFriendReqOut = false // TODO
+  retVal.isFriendReqIn = () => usersFriendReq(login, retVal.id, login)
+  retVal.isFriendReqOut = () => usersFriendReq(login, login, retVal.id)
   retVal.friends = () => userFriends(login, retVal.id)
   retVal.posts = () => userPosts(login, retVal.id),
   retVal.replies = () => userReplies(login, retVal.id)
@@ -197,15 +197,23 @@ async function lookupReply(login, query, projection) {
   return retVal
 }
 
-// TODO should only return mutuals
 async function userFriends(login, id) {
   const db = await dbPromise
-  const respA = await db.collection("friends").find({ personA: id }, { projection: { _id: 0, personB: 1 }})
+  const respA = await db.collection("friendReqs").find({ sender: id }, { projection: { _id: 0, receiver: 1 }})
   const listA = await respA.toArray()
-  const respB = await db.collection("friends").find({ personB: id }, { projection: { _id: 0, personA: 1 }})
+  const respB = await db.collection("friendReqs").find({ receiver: id }, { projection: { _id: 0, sender: 1 }})
   const listB = await respB.toArray()
-  const list = listA.map(({ personB }) => personB).concat(listB.map(({ personA }) => personA))
-  return list.map((uid) => user(login, uid))
+  const elemsA = {}
+  listA.forEach(({ receiver }) => elemsA[receiver] = true)
+  const retVal = []
+  listB.forEach(({ sender }) => { if (elemsA[sender]) retVal.push(sender) })
+  return retVal.map((uid) => user(login, uid))
+}
+
+async function usersFriendReq(login, sender, receiver) {
+  const db = await dbPromise
+  const resp = await db.collection("friendReqs").findOne({ sender, receiver }, { projection: { _id: 0, sender: 0, receiver: 0 }})
+  return resp !== null
 }
 
 async function userPosts(login, id) {
@@ -247,11 +255,11 @@ async function setFriendStatus(login, id, val) { // TODO test
   if (existsQuery === null) return false
 
   if (id === login) return false
-  const query = id < login ? { friendA: id, friendB: login } : { friendA: login, friendB: id }
+  const query = { sender: login, receiver: id }
   if (val)
-    await db.collection("friends").insertOne(query)
+    await db.collection("friendReqs").insertOne(query)
   else
-    await db.collection("friends").deleteOne(query)
+    await db.collection("friendReqs").deleteOne(query)
   return true
 }
 
@@ -277,7 +285,7 @@ async function makePost(login, message, images) {
     timestamp: Date.now(),
     poster: login,
     message,
-    images,
+    images, // TODO sanitize
   }
   const db = await dbPromise
   const response = await db.collection("posts").insertOne(query)
@@ -367,6 +375,7 @@ function checkTokThen(fn, errCond, override) {
       const returnVal = await fn(args)
       return returnVal
     } catch (err) {
+      console.log(err)
       return errCond
     }
   }
