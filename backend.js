@@ -20,7 +20,7 @@ type User {
   isFriendReqIn: Boolean!
   isFriendReqOut: Boolean!
   posts: [Post!]!
-  reposts: [Post!]!
+  reposts: [Repost!]!
   replies: [Reply!]!
 }
 
@@ -35,6 +35,12 @@ type Post {
   reposted: Boolean!
   canRepost: Boolean!
   replies: [Reply!]!
+}
+
+type Repost {
+  reposter: User!
+  post: Post!
+  timestamp: Int!
 }
 
 type Reply {
@@ -54,13 +60,15 @@ input Image {
   ext: String!
 }
 
+union PostOrRepost = Post | Repost
+
 type Query {
   myUser(tok: String!): User
   lookupUserId(tok: String, id: String!): User
   lookupUsername(tok: String, username: String!): User
   lookupPostId(tok: String, id: String!): Post
   lookupReplyId(tok: String, id: String!): Reply
-  feed(tok: String, pageNum: Int!): [Post]
+  feed(tok: String): [PostOrRepost!]
 }
 
 type Mutation {
@@ -82,7 +90,7 @@ type Mutation {
 type image = { bucket: string, region: string, uuid: string, ext: string }
 users: { username: string, name: string, pfp: image, pwHash: string, pwSalt: string } username is unique
 posts: { timestamp: int, poster: id, message: string, images: [image] }
-reposts: { reposter: id, postId: id } unique
+reposts: { timestamp: int, reposter: id, postId: id } unique
 replies: { timestamp: int, poster: id, message: string, replyTo: id }
 friendReqs: { sender: id, receiver: id } unique
 likes: { liker: id, post: id } unique
@@ -208,7 +216,32 @@ async function lookupReply(login, query, projection) {
   return retVal
 }
 
-async function userFriends(login, id) {
+async function feed(login) {
+  const db = await dbPromise
+  const friendsList = await userFriendsList(login, login)
+
+  const posts = await db.collection("posts").find({ poster: { "$in": friendsList } }, { timestamp: 1 })
+  const postsList = await posts.toArray()
+  const mappedPostsList = postsList.map(({ _id, timestamp }) => ({ timestamp, realThing: post(login, _id)}))
+
+  const reposts = await db.collection("reposts").find({ reposter: { "$in": friendsList } }, { _id: 0 })
+  const repostsList = await reposts.toArray()
+  const mappedRepostsList = repostsList.map(({ reposter, postId, timestamp }) => ({ timestamp, realThing: {
+    timestamp,
+    reposter: () => user(login, reposter),
+    post: () => post(login, postId),
+  }}))
+
+  const retVal =
+    mappedPostsList
+    .concat(mappedRepostsList)
+    .sort((a,b) => a.timestamp < b.timestamp)
+    .map(({ realThing }) => realThing)
+
+  return retVal
+}
+
+async function userFriendsList(login, id) {
   const db = await dbPromise
   const respA = await db.collection("friendReqs").find({ sender: id }, { projection: { _id: 0, receiver: 1 }})
   const listA = await respA.toArray()
@@ -218,6 +251,11 @@ async function userFriends(login, id) {
   listA.forEach(({ receiver }) => elemsA[receiver] = true)
   const retVal = []
   listB.forEach(({ sender }) => { if (elemsA[sender]) retVal.push(sender) })
+  return retVal
+}
+
+async function userFriends(login, id) {
+  const retVal = await userFriendsList(login, id)
   return retVal.map((uid) => user(login, uid))
 }
 
@@ -236,9 +274,13 @@ async function userPosts(login, id) {
 
 async function userReposts(login, id) {
   const db = await dbPromise
-  const resp = await db.collection("reposts").find({ reposter: id }, { projection: { _id: 0, postId: 1 }})
+  const resp = await db.collection("reposts").find({ reposter: id }, { projection: { _id: 0, timestamp: 1, postId: 1 }})
   const list = await resp.toArray()
-  return list.map(({ postId }) => post(login, postId))
+  return list.map(({ timestamp, postId }) => ({
+    timestamp,
+    reposter: (() => user(login, id)),
+    post: (() => post(login, postId)),
+  }))
 }
 
 async function userReplies(login, id) {
@@ -312,6 +354,7 @@ async function repost(login, postId) {
   const query = {
     reposter: login,
     postId: postId,
+    timestamp: Date.now(),
   }
   await db.collection("reposts").insertOne(query)
 
@@ -444,13 +487,17 @@ function checkTokThen(fn, errCond, override) {
 }
 
 const resolvers = {
+  PostOrRepost: {
+    __resolveType: (obj) => obj.reposter ? "Repost" : "Post",
+  },
+
   Query: {
     myUser: [({ login }) => user(login, login)],
     lookupUserId: [({ login, id }) => lookupUser(login, { _id: new ObjectId(id) }, { _id: 0, pwHash: 0, pwSalt: 0 })],
     lookupUsername: [({login, username }) => lookupUser(login, { username }, { username: 0, pwHash: 0, pwSalt: 0 })],
     lookupPostId: [({ login, id }) => lookupPost(login, { _id: new ObjectId(id) }, { _id: 0 })],
     lookupReplyId: [({ login, id }) => lookupReply(login, { _id: new ObjectId(id) }, { _id: 0 })],
-    feed: [({ login, pageNum }) => []], // TODO
+    feed: [({ login }) => feed(login)],
   },
 
   Mutation: {
